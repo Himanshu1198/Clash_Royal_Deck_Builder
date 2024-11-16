@@ -5,6 +5,7 @@ function App() {
   const [playerId, setPlayerId] = useState('')
   const [cards, setCards] = useState([])
   const [avgElixir, setAvgElixir] = useState(null)
+  const [clear, setClear] = useState(false)
 
   const onSubmit = async () => {
     try {
@@ -33,6 +34,20 @@ function App() {
         .getElementsByClassName('cards-container')[0]
         .classList.add('cards-container-shift')
     }, 2000)
+    setClear(true)
+  }
+
+  const onClear = () => {
+    setPlayerId('')
+    document
+      .getElementsByClassName('cards-container')[0]
+      .classList.remove('cards-container-shift')
+    setTimeout(() => {
+      document
+        .getElementsByClassName('container-container')[0]
+        .classList.remove('container-container-shift')
+    }, 400)
+    setClear(false)
   }
 
   return (
@@ -47,9 +62,16 @@ function App() {
               onChange={(e) => setPlayerId(e.target.value)}
               placeholder='Enter player id starting with #'
             />
-            <button id='submit-button' onClick={onSubmit}>
-              Submit
-            </button>
+            {!clear && (
+              <button id='submit-button' onClick={onSubmit}>
+                Submit
+              </button>
+            )}
+            {clear && (
+              <button id='submit-button' onClick={onClear}>
+                Clear
+              </button>
+            )}
           </div>
           {avgElixir !== null && <div>Average Elixir Cost: {avgElixir}</div>}
         </div>
