@@ -35,22 +35,42 @@ class Card:
     def score_defense(self):
         return self.hitpoints
 
-    def score_balance(self):
-        return self.damage + self.hitpoints
-
-# Fitness function - Now includes elixir cost as well
+# Improved Fitness Function
 def fitness(deck, optimization_type):
+    if not deck:
+        logger.debug("Empty deck provided.")
+        return 0
+
+    total_attack = sum(card.score_attack() for card in deck)
+    total_defense = sum(card.score_defense() for card in deck)
+    total_elixir = sum(card.elixir_cost for card in deck)
+
+    if total_elixir == 0:
+        logger.warning("Total elixir cost is zero. Returning fitness of 0 to avoid division by zero.")
+        return 0
+
     if optimization_type == "balanced":
-        # Balance the attack and defense, while considering the minimum elixir cost
-        total_attack = sum(card.score_attack() for card in deck)
-        total_defense = sum(card.score_defense() for card in deck)
-        total_elixir = sum(card.elixir_cost for card in deck)
-        logger.debug(f"Fitness calculation: Attack={total_attack}, Defense={total_defense}, Elixir={total_elixir}")
-        # Prioritize balance, but also try to minimize elixir cost
-        return (total_attack + total_defense) / total_elixir if total_elixir > 0 else 0
+        normalized_attack = total_attack / max(1, len(deck))
+        normalized_defense = total_defense / max(1, len(deck))
+        normalized_elixir = total_elixir / max(1, len(deck))
+
+        # Weights for attack, defense, and elixir cost
+        attack_weight = 0.5
+        defense_weight = 0.5
+        elixir_weight = 0.3
+
+        fitness_score = (
+            (attack_weight * normalized_attack + defense_weight * normalized_defense)
+            / (1 + elixir_weight * normalized_elixir)
+        )
+        logger.debug(f"Fitness calculation: Attack={total_attack}, Defense={total_defense}, "
+                     f"Elixir={total_elixir}, Fitness Score={fitness_score}")
+        return fitness_score
+
+    logger.error(f"Unsupported optimization type: {optimization_type}")
     return 0
 
-# Mutation - Same as before, random card replacement
+# Mutation - Random card replacement
 def mutate(deck, cards):
     index = random.randint(0, len(deck) - 1)
     new_card = random.choice(cards)
@@ -59,7 +79,7 @@ def mutate(deck, cards):
     deck[index] = new_card
     return deck
 
-# Simulated Annealing
+# Simulated Annealing with Enhanced Fitness Evaluation
 def simulated_annealing(cards, optimization_type, initial_temperature, cooling_rate, max_iterations):
     logger.debug("Starting simulated annealing")
     current_deck = random.sample(cards, 8)
@@ -76,7 +96,7 @@ def simulated_annealing(cards, optimization_type, initial_temperature, cooling_r
             current_deck = new_deck
             current_fitness = new_fitness
         else:
-            acceptance_probability = math.exp((new_fitness - current_fitness) / temperature)
+            acceptance_probability = math.exp((new_fitness - current_fitness) / max(temperature, 1e-3))
             if random.random() < acceptance_probability:
                 current_deck = new_deck
                 current_fitness = new_fitness
@@ -122,7 +142,7 @@ def match_cards(player_cards, csv_file):
         level = player_card.get("level")
         elixir_cost = player_card.get("elixirCost", 0)
         rarity = player_card.get("rarity")
-        icon_url = player_card.get("iconUrls", {}).get("medium", "")  # Get the icon URL
+        icon_url = player_card.get("iconUrls", {}).get("medium", "")
 
         for csv_card in csv_cards:
             if csv_card["name"] == name:
@@ -130,18 +150,18 @@ def match_cards(player_cards, csv_file):
                 damage_key = f"damage{level}"
                 if hitpoints_key in csv_card and damage_key in csv_card:
                     try:
-                        hitpoints = int(float(csv_card[hitpoints_key]))  # Safely convert to integer
-                        damage = int(float(csv_card[damage_key]))      # Safely convert to integer
+                        hitpoints = int(float(csv_card[hitpoints_key]))
+                        damage = int(float(csv_card[damage_key]))
                     except ValueError:
                         logger.warning(f"Invalid data for card: {name}")
-                        continue  # Skip this card if data is invalid
+                        continue
 
                     matched_cards.append(Card(
                         name=name,
                         current_level=int(level),
                         rarity=rarity,
                         elixir_cost=int(elixir_cost),
-                        icon_url=icon_url,  # Include the icon URL in the Card object
+                        icon_url=icon_url,
                         hitpoints=hitpoints,
                         damage=damage
                     ))
@@ -150,30 +170,22 @@ def match_cards(player_cards, csv_file):
 @app.route('/get-deck/<player_tag>', methods=['GET'])
 def get_deck(player_tag):
     logger.debug(f"Request received for player tag: {player_tag}")
-    
-    # Fetch player cards based on player_tag
     player_cards = fetch_player_cards(player_tag)
     if not player_cards:
-        logger.error("Failed to fetch player data.")
         return jsonify({"error": "Failed to fetch player data."}), 500
 
-    # Path to your card information CSV
     csv_file = "cardsInfo.csv"
     matched_cards = match_cards(player_cards, csv_file)
     if not matched_cards:
-        logger.error("No matched cards found.")
         return jsonify({"error": "No matched cards found."}), 500
 
-    # Optimize the deck with the "balanced" approach while minimizing elixir cost
     optimized_deck = simulated_annealing(
         matched_cards, "balanced", initial_temperature=100, cooling_rate=0.95, max_iterations=1000
     )
 
-    # Calculate the average elixir cost
     total_elixir_cost = sum(card.elixir_cost for card in optimized_deck)
     avg_elixir_cost = total_elixir_cost / len(optimized_deck) if optimized_deck else 0
 
-    # Prepare the response for the optimized deck
     optimized_deck_response = [
         {
             "name": card.name,
@@ -182,16 +194,11 @@ def get_deck(player_tag):
             "elixir_cost": card.elixir_cost,
             "damage": card.damage,
             "hitpoints": card.hitpoints,
-            "icon_url": card.icon_url  # Include the icon_url in the response
+            "icon_url": card.icon_url
         } for card in optimized_deck
     ]
 
-    logger.debug(f"Optimized deck: {optimized_deck_response}")
-    logger.debug(f"Average Elixir Cost: {avg_elixir_cost}")
-
-    # Return the response with deck and average elixir cost
     return jsonify({"status": "success", "deck": optimized_deck_response, 'avg': round(avg_elixir_cost, 2)}), 200
-
 
 if __name__ == "__main__":
     app.run(debug=True)
